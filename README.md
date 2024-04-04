@@ -112,7 +112,7 @@ We have learned various process scheduling policies and examined their propertie
   - Sketch your idea for implementing **each** scheduling policy.
     - Do not explain the code itself. Instead, focus on explaining your key idea and approach.
   - Explain how the priority of the processes are changed over time for PIP using `resources-adv2`.
-    - **Explain** when, why, and how much the priority inheritance takes place in the example.
+    - Explain **when, why, and how much** the priority inheritance takes place in the example.
     - DO NOT just copy-paste the output of a program.
   - Lesson learned
     - No need to recite what is explained in the class.
