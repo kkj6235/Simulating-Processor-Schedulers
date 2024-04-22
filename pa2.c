@@ -645,9 +645,96 @@ struct scheduler pcp_scheduler = {
 /***********************************************************************
  * Priority scheduler with priority inheritance protocol
  ***********************************************************************/
+static bool pip_acquire(int resource_id) {
+    struct resource *r = resources + resource_id;
+    if (!r->owner) {
+        r->owner = current;
+        return true;
+    }
+
+    struct process *p = NULL;
+
+    if(!list_empty(&r->waitqueue)){
+        p = list_first_entry(&r->waitqueue, struct process, list);
+        if(current->prio <p->prio && current->prio> r->owner->prio){
+            r->owner->prio = p->prio;
+        }
+    }
+
+    current->status = PROCESS_BLOCKED;
+    list_add_tail(&current->list, &r->waitqueue);
+
+    return false;
+}
+static void pip_release(int resource_id) {
+
+    struct resource *r = resources + resource_id;
+    struct process *waiter = NULL;
+
+    assert(r->owner == current);
+
+    r->owner = NULL;
+
+    /* Let's wake up ONE waiter (if exists) that came first */
+    if (!list_empty(&r->waitqueue)) {
+        struct process *p = NULL;
+
+        list_for_each_entry(p, &readyqueue, list) {
+            if (!waiter) {
+                waiter = p;
+            } else {
+                if (p->prio > waiter->prio) {
+                    waiter = p;
+                }
+            }
+        }
+
+        assert(waiter->status == PROCESS_BLOCKED);
+
+        list_del_init(&waiter->list);
+
+        waiter->status = PROCESS_READY;
+
+        list_add_tail(&waiter->list, &readyqueue);
+    }
+
+}
+static struct process *pip_schedule(void) {
+    struct process *next = NULL;
+
+
+    if (!current || current->status == PROCESS_BLOCKED) {
+        goto pick_next;
+    }
+
+    if (current->age < current->lifespan) {
+        return current;
+    }
+
+
+    pick_next:
+
+    if(!list_empty(&readyqueue)){
+        struct process *p = NULL;
+
+        list_for_each_entry(p, &readyqueue, list) {
+            if (!next) {
+                next = p;
+            } else {
+                if (p->prio > next->prio) {
+                    next = p;
+                }
+            }
+        }
+        list_del_init(&next->list);
+    }
+
+
+    return next;
+}
 struct scheduler pip_scheduler = {
         .name = "Priority + PIP Protocol",
-        /**
-         * Ditto
-         */
+        .acquire = pip_acquire,
+        .release = pip_release,
+        .schedule = pip_schedule,
 };
