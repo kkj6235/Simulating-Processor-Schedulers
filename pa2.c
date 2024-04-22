@@ -556,11 +556,90 @@ struct scheduler pa_scheduler = {
 /***********************************************************************
  * Priority scheduler with priority ceiling protocol
  ***********************************************************************/
+static bool pcp_acquire(int resource_id) {
+    struct resource *r = resources + resource_id;
+
+    if (!r->owner) {
+        /* This resource is not owned by any one. Take it! */
+        r->owner = current;
+        return true;
+    }
+    r->owner->prio = MAX_PRIO;
+    current->status = PROCESS_BLOCKED;
+    list_add_tail(&current->list, &r->waitqueue);
+    return false;
+}
+static void pcp_release(int resource_id) {
+
+    struct resource *r = resources + resource_id;
+    struct process *waiter = NULL;
+
+    assert(r->owner == current);
+
+    r->owner = NULL;
+
+    /* Let's wake up ONE waiter (if exists) that came first */
+    if (!list_empty(&r->waitqueue)) {
+        struct process *p = NULL;
+
+        list_for_each_entry(p, &readyqueue, list) {
+            if (!waiter) {
+                waiter = p;
+            } else {
+                if (p->prio > waiter->prio) {
+                    waiter = p;
+                }
+            }
+        }
+
+        assert(waiter->status == PROCESS_BLOCKED);
+
+        list_del_init(&waiter->list);
+
+        waiter->status = PROCESS_READY;
+
+        list_add_tail(&waiter->list, &readyqueue);
+    }
+
+}
+static struct process *pcp_schedule(void) {
+    struct process *next = NULL;
+
+
+    if (!current || current->status == PROCESS_BLOCKED) {
+        goto pick_next;
+    }
+
+    if (current->age < current->lifespan) {
+        return current;
+    }
+
+
+    pick_next:
+
+    if(!list_empty(&readyqueue)){
+        struct process *p = NULL;
+
+        list_for_each_entry(p, &readyqueue, list) {
+            if (!next) {
+                next = p;
+            } else {
+                if (p->prio > next->prio) {
+                    next = p;
+                }
+            }
+        }
+        list_del_init(&next->list);
+    }
+
+
+    return next;
+}
 struct scheduler pcp_scheduler = {
         .name = "Priority + PCP Protocol",
-        /**
-         * Ditto
-         */
+        .acquire = pcp_acquire,
+        .release = pcp_release,
+        .schedule = pcp_schedule,
 };
 
 /***********************************************************************
