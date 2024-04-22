@@ -433,11 +433,124 @@ struct scheduler prio_scheduler = {
 /***********************************************************************
  * Priority scheduler with aging
  ***********************************************************************/
+static bool pa_acquire(int resource_id) {
+    struct resource *r = resources + resource_id;
+
+    if (!r->owner) {
+        /* This resource is not owned by any one. Take it! */
+        r->owner = current;
+        return true;
+    }
+    if(current->prio < r->owner->prio){
+        current->status = PROCESS_BLOCKED;
+        list_add_tail(&current->list, &r->waitqueue);
+    }
+    else{
+        r->owner->status = PROCESS_BLOCKED;
+        list_add_tail(&r->owner->list, &r->waitqueue);
+        r->owner = current;
+        return true;
+    }
+    return false;
+}
+static void pa_release(int resource_id) {
+    struct resource *r = resources + resource_id;
+    struct process *waiter = NULL;
+
+    assert(r->owner == current);
+
+    r->owner = NULL;
+
+    if (!list_empty(&r->waitqueue)) {
+
+        struct process *p = NULL;
+
+        list_for_each_entry(p, &readyqueue, list) {
+            if (!waiter) {
+                waiter = p;
+            } else {
+                if (p->prio > waiter->prio) {
+                    waiter = p;
+                }
+            }
+        }
+
+        assert(waiter->status == PROCESS_BLOCKED);
+
+        list_del_init(&waiter->list);
+
+        waiter->status = PROCESS_READY;
+
+        list_add_tail(&waiter->list, &readyqueue);
+    }
+}
+static struct process *pa_schedule(void) {
+    struct process *next = NULL;
+    struct process *p = NULL;
+
+    if (!current || current->status == PROCESS_BLOCKED) {
+        goto pick_next;
+    }
+    if(!list_empty(&readyqueue)){
+        current->prio = current->prio_orig;
+
+        list_for_each_entry(p, &readyqueue, list) {
+            if(p->prio<MAX_PRIO){
+                p->prio++;
+            }
+
+            if (!next) {
+                next = p;
+            }
+            else{
+                if(p->prio>next->prio){
+                    next = p;
+                }
+            }
+        }
+
+        if(current->age < current->lifespan){
+            if(next->prio<current->prio){
+                return current;
+            }
+            list_add_tail(&current->list,&readyqueue);
+        }
+
+        list_del_init(&next->list);
+
+        return next;
+    }
+    else{
+        if(current->age < current->lifespan){
+            return current;
+        }
+        return NULL;
+    }
+
+
+pick_next:
+
+    if(!list_empty(&readyqueue)){
+        list_for_each_entry(p, &readyqueue, list) {
+            if (!next) {
+                next = p;
+            } else {
+                if (p->prio > next->prio) {
+                    next = p;
+                }
+            }
+        }
+        list_del_init(&next->list);
+    }
+
+
+    return next;
+}
 struct scheduler pa_scheduler = {
         .name = "Priority + aging",
-        /**
-         * Ditto
-         */
+        .acquire = pa_acquire,
+        .release = pa_release,
+        .schedule = pa_schedule,
 };
 
 /***********************************************************************
