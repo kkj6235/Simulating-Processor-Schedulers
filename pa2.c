@@ -177,7 +177,7 @@ pick_next:
 		next = list_first_entry(&readyqueue, struct process, list);
 
 		/**
-		 * Detach the process from the ready queue. Note that we use 
+		 * Detach the process from the ready queue. Note that we use
 		 * list_del_init() over list_del() to maintain the list head tidy.
 		 * Otherwise, the framework will complain (assert) on process exit.
 		 */
@@ -220,10 +220,9 @@ static struct process *sjf_schedule(void)
 
         struct process *p = NULL;
 
-        next = list_first_entry(&readyqueue, struct process, list);
         list_for_each_entry(p,&readyqueue,list) {
             if(!next){
-                next->lifespan = p->lifespan;
+                next = p;
             }
             else{
                 if(p->lifespan<next->lifespan){
@@ -250,16 +249,56 @@ struct scheduler sjf_scheduler = {
 /***********************************************************************
  * STCF scheduler
  ***********************************************************************/
+
+static struct process *stcf_schedule(void)
+{
+    struct process *next = NULL;
+
+    if (!list_empty(&readyqueue)) {
+
+        struct process *p = NULL;
+
+        list_for_each_entry(p,&readyqueue,list) {
+            if(!next){
+                next = p;
+            }
+            else{
+                if((p->lifespan-p->age)<(next->lifespan-next->age)){
+                    next = p;
+                }
+            }
+        }
+        if(!current){
+            list_del_init(&next->list);
+            return next;
+        }
+        if(current->lifespan!=current->age){
+            if((current->lifespan-current->age)<(next->lifespan-next->age)){
+                next = current;
+            }
+            else{
+                list_add_tail(&current->list,&readyqueue);
+            }
+        }
+        list_del_init(&next->list);
+
+    }
+    else{
+        if (current->age < current->lifespan) {
+            return current;
+        }
+    }
+    return next;
+}
 struct scheduler stcf_scheduler = {
 	.name = "Shortest Time-to-Complete First",
 	.acquire = fcfs_acquire, /* Use the default FCFS acquire() */
 	.release = fcfs_release, /* Use the default FCFS release() */
+    .schedule = stcf_schedule,
+        /* You need to check the newly created processes to implement STCF.
+         * Have a look at @forked() callback.
+         */
 
-	/* You need to check the newly created processes to implement STCF.
-	 * Have a look at @forked() callback.
-	 */
-
-	/* Obviously, you should implement stcf_schedule() and attach it here */
 };
 
 /***********************************************************************
