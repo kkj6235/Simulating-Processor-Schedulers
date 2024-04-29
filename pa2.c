@@ -671,7 +671,9 @@ static bool pip_acquire(int resource_id) {
         r->owner = current;
         return true;
     }
-
+    if(current->prio>r->owner->prio){
+        r->owner->prio = current->prio;
+    }
     list_del_init(&current->list);
     current->status = PROCESS_BLOCKED;
     list_add_tail(&current->list, &r->waitqueue);
@@ -685,13 +687,15 @@ static void pip_release(int resource_id) {
 
     assert(r->owner == current);
 
+    r->owner->prio = r->owner->prio_orig;
+
     r->owner = NULL;
 
     /* Let's wake up ONE waiter (if exists) that came first */
     if (!list_empty(&r->waitqueue)) {
         struct process *p = NULL;
 
-        list_for_each_entry(p, &readyqueue, list) {
+        list_for_each_entry(p, &r->waitqueue, list) {
             if (!waiter) {
                 waiter = p;
             } else {
@@ -700,7 +704,6 @@ static void pip_release(int resource_id) {
                 }
             }
         }
-
         assert(waiter->status == PROCESS_BLOCKED);
 
         list_del_init(&waiter->list);
@@ -713,7 +716,6 @@ static void pip_release(int resource_id) {
 }
 static struct process *pip_schedule(void) {
     struct process *next = NULL;
-    struct process *p = NULL;
 
     if(!list_empty(&readyqueue)){
         struct process *p = NULL;
@@ -732,7 +734,9 @@ static struct process *pip_schedule(void) {
             return next;
         }
         if(current->age<current->lifespan){
+
             if(current->prio<=next->prio){
+
                 if(current->status!=PROCESS_BLOCKED){
                     list_add_tail(&current->list, &readyqueue);
                 }
@@ -741,8 +745,11 @@ static struct process *pip_schedule(void) {
 
             }
             else{
+                if(current->status==PROCESS_BLOCKED){
+                    list_del_init(&next->list);
+                    return next;
+                }
                 return current;
-
             }
 
         }
