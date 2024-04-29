@@ -341,82 +341,86 @@ static bool prio_acquire(int resource_id) {
         r->owner = current;
         return true;
     }
-    if(current->prio < r->owner->prio){
-        current->status = PROCESS_BLOCKED;
-        list_add_tail(&current->list, &r->waitqueue);
-    }
-    else{
-        r->owner->status = PROCESS_BLOCKED;
-        list_add_tail(&r->owner->list, &r->waitqueue);
-        r->owner = current;
-        return true;
-    }
+    list_del_init(&current->list);
+    list_add_tail(&current->list, &r->waitqueue);
+    current->status = PROCESS_BLOCKED;
+
     return false;
 }
 static void prio_release(int resource_id) {
     struct resource *r = resources + resource_id;
     struct process *waiter = NULL;
-
     assert(r->owner == current);
 
     r->owner = NULL;
-
     if (!list_empty(&r->waitqueue)) {
 
         struct process *p = NULL;
-
-        list_for_each_entry(p, &readyqueue, list) {
+        list_for_each_entry(p,&r->waitqueue , list) {
             if (!waiter) {
                 waiter = p;
-            } else {
+            }
+            else {
                 if (p->prio > waiter->prio) {
                     waiter = p;
                 }
             }
+
         }
 
         assert(waiter->status == PROCESS_BLOCKED);
 
         list_del_init(&waiter->list);
-
         waiter->status = PROCESS_READY;
 
         list_add_tail(&waiter->list, &readyqueue);
     }
 }
 static struct process *prio_schedule(void) {
+
     struct process *next = NULL;
-
-
-    if (!current || current->status == PROCESS_BLOCKED) {
-        goto pick_next;
-    }
-
-    if (current->age < current->lifespan) {
-        return current;
-    }
-
-
-    pick_next:
+    struct process *p = NULL;
 
     if(!list_empty(&readyqueue)){
-        struct process *p = NULL;
 
         list_for_each_entry(p, &readyqueue, list) {
             if (!next) {
                 next = p;
-            } else {
-                if (p->prio > next->prio) {
+            }
+            else {
+                if (p->prio > next->prio && p->status==PROCESS_READY) {
                     next = p;
                 }
             }
         }
-        list_del_init(&next->list);
+
+        if (!current || current->age==current->lifespan) {
+            list_del_init(&next->list);
+            return next;
+        }
+        else {
+            if(current->status!=PROCESS_BLOCKED){
+
+                if(current->prio>next->prio){
+                    return current;
+                }
+                if(current->age!=current->lifespan){
+                    list_add_tail(&current->list, &readyqueue);
+                }
+            }
+
+            list_del_init(&next->list);
+            return next;
+        }
     }
-
-
+    else{
+        if(current->age<current->lifespan){
+            return current;
+        }
+    }
     return next;
 }
+
 struct scheduler prio_scheduler = {
         .name = "Priority",
         .acquire = prio_acquire,
@@ -562,17 +566,22 @@ static bool pcp_acquire(int resource_id) {
     if (!r->owner) {
         /* This resource is not owned by any one. Take it! */
         r->owner = current;
+        r->owner->prio = MAX_PRIO;
         return true;
     }
-    r->owner->prio = MAX_PRIO;
+    list_del_init(&current->list);
     current->status = PROCESS_BLOCKED;
+
     list_add_tail(&current->list, &r->waitqueue);
+
     return false;
 }
 static void pcp_release(int resource_id) {
 
     struct resource *r = resources + resource_id;
     struct process *waiter = NULL;
+
+    r->owner->prio=r->owner->prio_orig;
 
     assert(r->owner == current);
 
@@ -582,7 +591,7 @@ static void pcp_release(int resource_id) {
     if (!list_empty(&r->waitqueue)) {
         struct process *p = NULL;
 
-        list_for_each_entry(p, &readyqueue, list) {
+        list_for_each_entry(p, &r->waitqueue, list) {
             if (!waiter) {
                 waiter = p;
             } else {
@@ -591,34 +600,21 @@ static void pcp_release(int resource_id) {
                 }
             }
         }
-
         assert(waiter->status == PROCESS_BLOCKED);
 
         list_del_init(&waiter->list);
 
         waiter->status = PROCESS_READY;
-
         list_add_tail(&waiter->list, &readyqueue);
     }
 
 }
 static struct process *pcp_schedule(void) {
     struct process *next = NULL;
+    struct process *p = NULL;
 
-
-    if (!current || current->status == PROCESS_BLOCKED) {
-        goto pick_next;
-    }
-
-    if (current->age < current->lifespan) {
-        return current;
-    }
-
-
-    pick_next:
 
     if(!list_empty(&readyqueue)){
-        struct process *p = NULL;
 
         list_for_each_entry(p, &readyqueue, list) {
             if (!next) {
@@ -629,10 +625,34 @@ static struct process *pcp_schedule(void) {
                 }
             }
         }
+        if(!current){
+            list_del_init(&next->list);
+            return next;
+        }
+        if(current->age<current->lifespan){
+            if(current->prio<=next->prio){
+                if(current->status!=PROCESS_BLOCKED){
+                    list_add_tail(&current->list, &readyqueue);
+                }
+                list_del_init(&next->list);
+                return next;
+
+            }
+            else{
+                return current;
+
+            }
+
+        }
+
         list_del_init(&next->list);
     }
+    else{
 
-
+        if(current->age<current->lifespan){
+            return current;
+        }
+    }
     return next;
 }
 struct scheduler pcp_scheduler = {
@@ -652,15 +672,7 @@ static bool pip_acquire(int resource_id) {
         return true;
     }
 
-    struct process *p = NULL;
-
-    if(!list_empty(&r->waitqueue)){
-        p = list_first_entry(&r->waitqueue, struct process, list);
-        if(current->prio <p->prio && current->prio> r->owner->prio){
-            r->owner->prio = p->prio;
-        }
-    }
-
+    list_del_init(&current->list);
     current->status = PROCESS_BLOCKED;
     list_add_tail(&current->list, &r->waitqueue);
 
@@ -701,18 +713,7 @@ static void pip_release(int resource_id) {
 }
 static struct process *pip_schedule(void) {
     struct process *next = NULL;
-
-
-    if (!current || current->status == PROCESS_BLOCKED) {
-        goto pick_next;
-    }
-
-    if (current->age < current->lifespan) {
-        return current;
-    }
-
-
-    pick_next:
+    struct process *p = NULL;
 
     if(!list_empty(&readyqueue)){
         struct process *p = NULL;
@@ -726,7 +727,32 @@ static struct process *pip_schedule(void) {
                 }
             }
         }
+        if(!current){
+            list_del_init(&next->list);
+            return next;
+        }
+        if(current->age<current->lifespan){
+            if(current->prio<=next->prio){
+                if(current->status!=PROCESS_BLOCKED){
+                    list_add_tail(&current->list, &readyqueue);
+                }
+                list_del_init(&next->list);
+                return next;
+
+            }
+            else{
+                return current;
+
+            }
+
+        }
+
         list_del_init(&next->list);
+    }
+    else{
+        if(current->age<current->lifespan){
+            return current;
+        }
     }
 
 
